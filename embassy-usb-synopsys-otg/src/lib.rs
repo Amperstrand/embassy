@@ -781,7 +781,6 @@ impl<'d, const MAX_EP_COUNT: usize> Bus<'d, MAX_EP_COUNT> {
                             w.set_eptyp(to_eptyp(ep.ep_type));
                             w.set_sd0pid_sevnfrm(true);
                             w.set_txfnum(index as _);
-                            w.set_snak(true);
                         }
                     });
                 });
