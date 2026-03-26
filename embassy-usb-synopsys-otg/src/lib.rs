@@ -1198,9 +1198,12 @@ impl<'d> embassy_usb_driver::EndpointIn for Endpoint<'d, In> {
         }
 
         let index = self.info.addr.index();
-        // Wait for previous transfer to complete and check if endpoint is disabled
+        // Wait for previous transfer to complete and check if endpoint is disabled.
+        // DEBUG: bounded spin to detect EPENA stuck condition and dump registers.
+        let mut wait_count = 0u32;
         poll_fn(|cx| {
             self.state.in_waker.register(cx.waker());
+            wait_count += 1;
 
             let diepctl = self.regs.diepctl(index).read();
             let dtxfsts = self.regs.dtxfsts(index).read();
@@ -1214,6 +1217,36 @@ impl<'d> embassy_usb_driver::EndpointIn for Endpoint<'d, In> {
             } else if !diepctl.epena() {
                 trace!("write ep={:?} wait for prev: ready", self.info.addr);
                 Poll::Ready(Ok(()))
+            } else if wait_count > 1_000_000 {
+                // EPENA stuck for too many polls — dump full register state
+                #[cfg(feature = "defmt")]
+                defmt::warn!(
+                    "write ep={:?}: EPENA STUCK after {} polls! Dumping registers:",
+                    self.info.addr,
+                    wait_count
+                );
+                #[cfg(feature = "defmt")]
+                defmt::warn!(
+                    "  DIEPCTL={:08x} DIEPINT={:08x} DIEPTSIZ={:08x}",
+                    self.regs.diepctl(index).read().0,
+                    self.regs.diepint(index).read().0,
+                    self.regs.dieptsiz(index).read().0,
+                );
+                #[cfg(feature = "defmt")]
+                defmt::warn!(
+                    "  DTXFSTS={:08x} DAINT={:08x} GINTSTS={:08x}",
+                    self.regs.dtxfsts(index).read().0,
+                    self.regs.daint().read().0,
+                    self.regs.gintsts().read().0,
+                );
+                #[cfg(feature = "defmt")]
+                defmt::warn!(
+                    "  GRSTCTL={:08x} GOTGINT={:08x}",
+                    self.regs.grstctl().read().0,
+                    self.regs.gotgint().read().0,
+                );
+                // Return Disabled to unblock the caller and let it handle the error
+                Poll::Ready(Err(EndpointError::Disabled))
             } else {
                 trace!("write ep={:?} wait for prev: pending", self.info.addr);
                 Poll::Pending
