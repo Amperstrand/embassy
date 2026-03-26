@@ -57,6 +57,8 @@ pub unsafe fn on_interrupt<const MAX_EP_COUNT: usize>(r: Otg, state: &State<MAX_
 
                 // flushing TX if something stuck in control endpoint
                 if r.dieptsiz(ep_num).read().pktcnt() != 0 {
+                    // Wait for AHB idle first (STM32 errata ES0321 §2.16.1)
+                    while !r.grstctl().read().ahbidl() {}
                     r.grstctl().modify(|w| {
                         w.set_txfnum(ep_num as _);
                         w.set_txfflsh(true);
@@ -748,7 +750,8 @@ impl<'d, const MAX_EP_COUNT: usize> Bus<'d, MAX_EP_COUNT> {
                 "FIFO allocations exceeded maximum capacity"
             );
 
-            // Flush fifos
+            // Flush fifos. Wait for AHB idle first (STM32 errata ES0321 §2.16.1)
+            while !regs.grstctl().read().ahbidl() {}
             regs.grstctl().write(|w| {
                 w.set_rxfflsh(true);
                 w.set_txfflsh(true);
@@ -1014,7 +1017,8 @@ impl<'d, const MAX_EP_COUNT: usize> embassy_usb_driver::Bus for Bus<'d, MAX_EP_C
                         w.set_cnak(enabled); // clear NAK that might've been set by SNAK above.
                     });
 
-                    // Flush tx fifo
+                    // Flush tx fifo. Wait for AHB idle first (STM32 errata ES0321 §2.16.1)
+                    while !regs.grstctl().read().ahbidl() {}
                     regs.grstctl().write(|w| {
                         w.set_txfflsh(true);
                         w.set_txfnum(ep_addr.index() as _);
