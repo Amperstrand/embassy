@@ -1003,12 +1003,31 @@ impl<'d, const MAX_EP_COUNT: usize> embassy_usb_driver::Bus for Bus<'d, MAX_EP_C
             }
             Direction::In => {
                 critical_section::with(|_| {
-                    // cancel transfer if active
+                    // cancel transfer if active (proper SNAK->wait INEPNE->EPDIS->wait EPDISD sequence)
                     if !enabled && regs.diepctl(ep_addr.index()).read().epena() {
                         regs.diepctl(ep_addr.index()).modify(|w| {
-                            w.set_snak(true); // set NAK
+                            w.set_snak(true);
+                        });
+                        let mut count = 0u32;
+                        while !regs.diepint(ep_addr.index()).read().inepne() {
+                            count += 1;
+                            if count > 100_000 {
+                                break;
+                            }
+                        }
+                        regs.diepctl(ep_addr.index()).modify(|w| {
                             w.set_epdis(true);
-                        })
+                        });
+                        count = 0;
+                        while !regs.diepint(ep_addr.index()).read().epdisd() {
+                            count += 1;
+                            if count > 100_000 {
+                                break;
+                            }
+                        }
+                        regs.diepint(ep_addr.index()).modify(|w| {
+                            w.set_epdisd(true);
+                        });
                     }
 
                     regs.diepctl(ep_addr.index()).modify(|w| {
